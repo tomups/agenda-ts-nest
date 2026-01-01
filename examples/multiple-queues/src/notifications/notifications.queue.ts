@@ -1,5 +1,5 @@
-import Agenda from 'agenda';
-import { Every, InjectQueue, OnQueueReady, Queue } from 'agenda-nest';
+import Agenda from 'agenda-ts';
+import { Every, InjectQueue, Queue } from 'agenda-nest';
 
 @Queue('notifications')
 export class NotificationsQueue {

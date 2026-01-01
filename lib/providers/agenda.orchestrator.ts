@@ -5,7 +5,7 @@ import {
   OnApplicationBootstrap,
 } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
-import Agenda, { AgendaConfig, Job, Processor } from 'agenda';
+import Agenda, { AgendaConfig, Job, Processor } from 'agenda-ts';
 import { NO_QUEUE_FOUND } from '../agenda.messages';
 import {
   AgendaModuleJobOptions,
@@ -17,7 +17,7 @@ import { AgendaQueueConfig } from '../interfaces';
 import { DatabaseService } from './database.service';
 
 type JobProcessorConfig = {
-  handler: Processor;
+  handler: Processor<any>;
   type: JobProcessorType;
   options: RepeatableJobOptions | NonRepeatableJobOptions;
   useCallback: boolean;
@@ -55,6 +55,11 @@ export class AgendaOrchestrator
 
       this.attachEventListeners(queue, registry);
 
+      // Add default error handler to prevent unhandled errors during shutdown
+      queue.on('error', (error) => {
+        this.logger.error(error);
+      });
+
       queue.mongo(
         this.database.getConnection(),
         config.collection || queueToken,
@@ -72,9 +77,15 @@ export class AgendaOrchestrator
 
   async beforeApplicationShutdown() {
     for await (const queue of this.queues) {
-      const [, config] = queue;
+      const [, registry] = queue;
 
-      await config.queue.stop();
+      try {
+        await registry.queue.stop();
+        // Wait for running jobs to complete
+        await registry.queue.drain();
+      } catch {
+        // Queue may not have been started or already stopped
+      }
     }
 
     await this.database.disconnect();
@@ -94,7 +105,7 @@ export class AgendaOrchestrator
 
   addJobProcessor(
     queueToken: string,
-    processor: Processor & Record<'_name', string>,
+    processor: Processor<any> & Record<'_name', string>,
     options: AgendaModuleJobOptions,
     type: JobProcessorType,
     useCallback: boolean,
@@ -122,7 +133,7 @@ export class AgendaOrchestrator
 
   private attachEventListeners(agenda: Agenda, registry: QueueRegistry) {
     registry.listeners.forEach((listener: EventListener, eventName: string) => {
-      agenda.on(eventName, listener);
+      agenda.on(eventName as any, listener);
     });
   }
 
@@ -132,11 +143,13 @@ export class AgendaOrchestrator
         const { options, handler, useCallback } = jobConfig;
 
         if (useCallback) {
-          agenda.define(jobName, options, (job: Job, done: () => void) =>
-            handler(job, done),
+          agenda.define(
+            jobName,
+            (job: Job, done: () => void) => handler(job, done),
+            options as any,
           );
         } else {
-          agenda.define(jobName, options, handler);
+          agenda.define(jobName, handler, options as any);
         }
       },
     );
