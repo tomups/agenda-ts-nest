@@ -5,7 +5,14 @@ import {
   OnApplicationBootstrap,
 } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
-import Agenda, { AgendaConfig, Job, Processor } from 'agenda-ts';
+import Agenda, {
+  AgendaConfig,
+  AgendaOnEventType,
+  DefineOptions,
+  Job,
+  JobAttributesData,
+  Processor,
+} from 'agenda-ts';
 import { NO_QUEUE_FOUND } from '../agenda.messages';
 import {
   AgendaModuleJobOptions,
@@ -17,13 +24,13 @@ import { AgendaQueueConfig } from '../interfaces';
 import { DatabaseService } from './database.service';
 
 type JobProcessorConfig = {
-  handler: Processor<any>;
+  handler: Processor<JobAttributesData>;
   type: JobProcessorType;
   options: RepeatableJobOptions | NonRepeatableJobOptions;
   useCallback: boolean;
 };
 
-export type EventListener = (...args: any[]) => void;
+type EventListener = (...args: unknown[]) => void;
 
 type QueueRegistry = {
   config: AgendaQueueConfig;
@@ -105,7 +112,7 @@ export class AgendaOrchestrator
 
   addJobProcessor(
     queueToken: string,
-    processor: Processor<any> & Record<'_name', string>,
+    processor: Processor<JobAttributesData> & Record<'_name', string>,
     options: AgendaModuleJobOptions,
     type: JobProcessorType,
     useCallback: boolean,
@@ -133,7 +140,8 @@ export class AgendaOrchestrator
 
   private attachEventListeners(agenda: Agenda, registry: QueueRegistry) {
     registry.listeners.forEach((listener: EventListener, eventName: string) => {
-      agenda.on(eventName as any, listener);
+      // agenda-ts emits job-specific events like 'start:jobName' but their types don't include them
+      agenda.on(eventName as AgendaOnEventType, listener);
     });
   }
 
@@ -145,11 +153,13 @@ export class AgendaOrchestrator
         if (useCallback) {
           agenda.define(
             jobName,
-            (job: Job, done: () => void) => handler(job, done),
-            options as any,
+            (job: Job<JobAttributesData>, done: () => void) => {
+              return handler(job, done);
+            },
+            options as DefineOptions,
           );
         } else {
-          agenda.define(jobName, handler, options as any);
+          agenda.define(jobName, handler, options as DefineOptions);
         }
       },
     );
